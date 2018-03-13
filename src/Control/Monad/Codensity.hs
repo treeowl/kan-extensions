@@ -14,8 +14,9 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 #endif
 
--- We don't use TypeInType for 8.0 because trying to build this
--- package would lead to a GHC panic.
+-- We don't use TypeInType for 8.0 because that feature was pretty
+-- unreliable then; we don't want to have to worry about GHC panics
+-- behind every bush.
 #if __GLASGOW_HASKELL__ >= 802
 #define USE_TYPE_IN_TYPE 1
 #endif
@@ -65,7 +66,7 @@ import Data.Typeable
 #endif
 #ifdef USE_TYPE_IN_TYPE
 import GHC.Exts (TYPE)
-import Control.Monad.Codensity.Internal (type ($$$))
+import Data.Type.Equality (type (~~))
 #endif
 
 -- |
@@ -136,12 +137,11 @@ instance Monad (Codensity f) where
 -- MonadFail f => MonadFail (Codensity * LiftedRep f)
 -- 
 -- Since FlexibleInstances are bad for inference, we avoid them when
--- we can by carefully pushing kind constraints to the left. Unfortunately,
--- this is a slightly delicate operation, and leads to ugly-looking
--- constraints.
+-- we can by carefully pushing kind constraints to the left.
 
 #ifdef USE_TYPE_IN_TYPE
-instance Fail.MonadFail $$$ f => Fail.MonadFail (Codensity (f :: k -> TYPE rep)) where
+instance (f ~~ f', Fail.MonadFail f')
+  => Fail.MonadFail (Codensity (f :: k -> TYPE rep)) where
 #else
 instance Fail.MonadFail f => Fail.MonadFail (Codensity f) where
 #endif
@@ -149,7 +149,8 @@ instance Fail.MonadFail f => Fail.MonadFail (Codensity f) where
   {-# INLINE fail #-}
 
 #ifdef USE_TYPE_IN_TYPE
-instance MonadIO $$$ m => MonadIO (Codensity (m :: k -> TYPE rep)) where
+instance (m ~~ m', MonadIO m')
+  => MonadIO (Codensity (m :: k -> TYPE rep)) where
 #else
 instance MonadIO m => MonadIO (Codensity m) where
 #endif
@@ -161,7 +162,8 @@ instance MonadTrans Codensity where
   {-# INLINE lift #-}
 
 #ifdef USE_TYPE_IN_TYPE
-instance Alt $$$ v => Alt (Codensity (v :: k -> TYPE rep)) where
+instance (v ~~ v', Alt v')
+  => Alt (Codensity (v :: k -> TYPE rep)) where
 #else
 instance Alt v => Alt (Codensity v) where
 #endif
@@ -169,7 +171,7 @@ instance Alt v => Alt (Codensity v) where
   {-# INLINE (<!>) #-}
 
 #ifdef USE_TYPE_IN_TYPE
-instance Plus $$$ v => Plus (Codensity (v :: k -> TYPE rep)) where
+instance (v ~~ v', Plus v') => Plus (Codensity (v :: k -> TYPE rep)) where
 #else
 instance Plus v => Plus (Codensity v) where
 #endif
@@ -187,7 +189,8 @@ instance Plus v => MonadPlus (Codensity v) where
 -}
 
 #ifdef USE_TYPE_IN_TYPE
-instance Alternative $$$ v => Alternative (Codensity (v :: k -> TYPE rep)) where
+instance (v ~~ v', Alternative v')
+  => Alternative (Codensity (v :: k -> TYPE rep)) where
 #else
 instance Alternative v => Alternative (Codensity v) where
 #endif
@@ -196,8 +199,9 @@ instance Alternative v => Alternative (Codensity v) where
   Codensity m <|> Codensity n = Codensity (\k -> m k <|> n k)
   {-# INLINE (<|>) #-}
 
-#if USE_TYPE_IN_TYPE
-instance Alternative $$$ v => MonadPlus (Codensity (v :: k -> TYPE rep))
+#ifdef USE_TYPE_IN_TYPE
+instance (v ~~ v', Alternative v')
+   => MonadPlus (Codensity (v :: k -> TYPE rep))
 #elif __GLASGOW_HASKELL__ >= 710
 instance Alternative v => MonadPlus (Codensity v)
 #else
@@ -287,17 +291,32 @@ ranToCodensity :: Ran g g a -> Codensity g a
 ranToCodensity (Ran m) = Codensity m
 {-# INLINE ranToCodensity #-}
 
+#ifdef USE_TYPE_IN_TYPE
+instance (m ~~ m', Functor f, MonadFree f m')
+  => MonadFree f (Codensity (m :: k -> TYPE rep)) where
+#else
 instance (Functor f, MonadFree f m) => MonadFree f (Codensity m) where
+#endif
   wrap t = Codensity (\h -> wrap (fmap (\p -> runCodensity p h) t))
   {-# INLINE wrap #-}
 
+#ifdef USE_TYPE_IN_TYPE
+instance (m ~~ m', MonadReader r m')
+  => MonadState r (Codensity (m :: k -> TYPE rep)) where
+#else
 instance MonadReader r m => MonadState r (Codensity m) where
+#endif
   get = Codensity (ask >>=)
   {-# INLINE get #-}
   put s = Codensity (\k -> local (const s) (k ()))
   {-# INLINE put #-}
 
+#ifdef USE_TYPE_IN_TYPE
+instance (m ~~ m', MonadReader r m')
+  => MonadReader r (Codensity (m :: k -> TYPE rep)) where
+#else
 instance MonadReader r m => MonadReader r (Codensity m) where
+#endif
   ask = Codensity (ask >>=)
   {-# INLINE ask #-}
   local f m = Codensity $ \c -> ask >>= \r -> local f . runCodensity m $ local (const r) . c

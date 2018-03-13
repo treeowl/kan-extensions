@@ -81,9 +81,6 @@ library
     Data.Functor.Kan.Ran
     Data.Functor.Yoneda
     Data.Functor.Coyoneda
-  if impl(GHC >= 8.2)
-    exposed-modules:
-      Control.Monad.Codensity.Internal
 
   ghc-options: -Wall
 
