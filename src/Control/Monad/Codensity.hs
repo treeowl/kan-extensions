@@ -13,8 +13,17 @@
 #if (__GLASGOW_HASKELL__ >= 708) && (__GLASGOW_HASKELL__ < 802)
 {-# LANGUAGE DeriveDataTypeable #-}
 #endif
+
+-- We don't use TypeInType for 8.0 because trying to build this
+-- package would lead to a GHC panic.
 #if __GLASGOW_HASKELL__ >= 802
+#define USE_TYPE_IN_TYPE 1
+#endif
+
+#ifdef USE_TYPE_IN_TYPE
 {-# LANGUAGE TypeInType #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 #endif
 
 -----------------------------------------------------------------------------
@@ -54,8 +63,9 @@ import Data.Functor.Rep
 #if (__GLASGOW_HASKELL__ >= 708) && (__GLASGOW_HASKELL__ < 800)
 import Data.Typeable
 #endif
-#if __GLASGOW_HASKELL__ >= 802
+#ifdef USE_TYPE_IN_TYPE
 import GHC.Exts (TYPE)
+import Control.Monad.Codensity.Internal (type ($$$))
 #endif
 
 -- |
@@ -69,7 +79,7 @@ import GHC.Exts (TYPE)
 -- Voigtländer for more information about this type.
 --
 -- <https://www.janis-voigtlaender.eu/papers/AsymptoticImprovementOfComputationsOverFreeMonads.pdf>
-#if __GLASGOW_HASKELL__ >= 802
+#ifdef USE_TYPE_IN_TYPE
 newtype Codensity (m :: k -> TYPE rep) a = Codensity
 -- Note: we *could* generalize @a@ to @TYPE repa@, but the 'Functor'
 -- instance wouldn't carry that, so it doesn't really seem worth
@@ -83,7 +93,7 @@ newtype Codensity m a = Codensity
     deriving Typeable
 #endif
 
-#if __GLASGOW_HASKELL__ >= 802
+#ifdef USE_TYPE_IN_TYPE
 instance Functor (Codensity (k :: j -> TYPE rep)) where
 #else
 instance Functor (Codensity k) where
@@ -91,7 +101,7 @@ instance Functor (Codensity k) where
   fmap f (Codensity m) = Codensity (\k -> m (\x -> k (f x)))
   {-# INLINE fmap #-}
 
-#if __GLASGOW_HASKELL__ >= 802
+#ifdef USE_TYPE_IN_TYPE
 instance Apply (Codensity (f :: k -> TYPE rep)) where
 #else
 instance Apply (Codensity f) where
@@ -99,7 +109,7 @@ instance Apply (Codensity f) where
   (<.>) = (<*>)
   {-# INLINE (<.>) #-}
 
-#if __GLASGOW_HASKELL__ >= 802
+#ifdef USE_TYPE_IN_TYPE
 instance Applicative (Codensity (f :: k -> TYPE rep)) where
 #else
 instance Applicative (Codensity f) where
@@ -109,7 +119,7 @@ instance Applicative (Codensity f) where
   Codensity f <*> Codensity g = Codensity (\bfr -> f (\ab -> g (\x -> bfr (ab x))))
   {-# INLINE (<*>) #-}
 
-#if __GLASGOW_HASKELL__ >= 802
+#ifdef USE_TYPE_IN_TYPE
 instance Monad (Codensity (f :: k -> TYPE rep)) where
 #else
 instance Monad (Codensity f) where
@@ -119,11 +129,30 @@ instance Monad (Codensity f) where
   m >>= k = Codensity (\c -> runCodensity m (\a -> runCodensity (k a) c))
   {-# INLINE (>>=) #-}
 
+-- Writing instances like
+-- instance MonadFail f => MonadFail (Codensity f)
+-- leads to some hidden flexible instances. Haddock will show things like
+--
+-- MonadFail f => MonadFail (Codensity * LiftedRep f)
+-- 
+-- Since FlexibleInstances are bad for inference, we avoid them when
+-- we can by carefully pushing kind constraints to the left. Unfortunately,
+-- this is a slightly delicate operation, and leads to ugly-looking
+-- constraints.
+
+#ifdef USE_TYPE_IN_TYPE
+instance Fail.MonadFail $$$ f => Fail.MonadFail (Codensity (f :: k -> TYPE rep)) where
+#else
 instance Fail.MonadFail f => Fail.MonadFail (Codensity f) where
+#endif
   fail msg = Codensity $ \ _ -> Fail.fail msg
   {-# INLINE fail #-}
 
+#ifdef USE_TYPE_IN_TYPE
+instance MonadIO $$$ m => MonadIO (Codensity (m :: k -> TYPE rep)) where
+#else
 instance MonadIO m => MonadIO (Codensity m) where
+#endif
   liftIO = lift . liftIO
   {-# INLINE liftIO #-}
 
@@ -131,11 +160,19 @@ instance MonadTrans Codensity where
   lift m = Codensity (m >>=)
   {-# INLINE lift #-}
 
+#ifdef USE_TYPE_IN_TYPE
+instance Alt $$$ v => Alt (Codensity (v :: k -> TYPE rep)) where
+#else
 instance Alt v => Alt (Codensity v) where
+#endif
   Codensity m <!> Codensity n = Codensity (\k -> m k <!> n k)
   {-# INLINE (<!>) #-}
 
+#ifdef USE_TYPE_IN_TYPE
+instance Plus $$$ v => Plus (Codensity (v :: k -> TYPE rep)) where
+#else
 instance Plus v => Plus (Codensity v) where
+#endif
   zero = Codensity (const zero)
   {-# INLINE zero #-}
 
@@ -149,13 +186,19 @@ instance Plus v => MonadPlus (Codensity v) where
   mplus = (<!>)
 -}
 
+#ifdef USE_TYPE_IN_TYPE
+instance Alternative $$$ v => Alternative (Codensity (v :: k -> TYPE rep)) where
+#else
 instance Alternative v => Alternative (Codensity v) where
+#endif
   empty = Codensity (\_ -> empty)
   {-# INLINE empty #-}
   Codensity m <|> Codensity n = Codensity (\k -> m k <|> n k)
   {-# INLINE (<|>) #-}
 
-#if __GLASGOW_HASKELL__ >= 710
+#if USE_TYPE_IN_TYPE
+instance Alternative $$$ v => MonadPlus (Codensity (v :: k -> TYPE rep))
+#elif __GLASGOW_HASKELL__ >= 710
 instance Alternative v => MonadPlus (Codensity v)
 #else
 instance MonadPlus v => MonadPlus (Codensity v) where
